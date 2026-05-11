@@ -119,6 +119,15 @@
         <p class="hint">Touchez l'écran pour activer le son</p>
       </div>
     `;
+    const hint = root.querySelector('.timer .hint');
+    root.querySelector('.timer').addEventListener('pointerdown', () => {
+      hint.style.opacity = '0';
+      setTimeout(() => {
+        hint.textContent = "you're on";
+        hint.classList.add('on');
+        hint.style.opacity = '';
+      }, 200);
+    }, { once: true });
     tick();
   }
 })();
