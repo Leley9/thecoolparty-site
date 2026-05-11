@@ -1,6 +1,9 @@
 (async () => {
+  const root = document.getElementById('root');
+  const show404 = () => { root.innerHTML = '<div class="nf">404 Not Found</div>'; };
+
   const hash = location.hash.slice(1);
-  if (!hash) return;
+  if (!hash) { show404(); return; }
 
   const b64urlDecode = (s) => {
     s = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -30,12 +33,12 @@
     );
     content = JSON.parse(new TextDecoder().decode(plain));
   } catch {
+    show404();
     return;
   }
 
   const { html, css, reveal, audio: hasAudio, images = [] } = content;
   const revealAt = new Date(reveal).getTime();
-  const root = document.getElementById('root');
 
   const style = document.createElement('style');
   style.textContent = css;
