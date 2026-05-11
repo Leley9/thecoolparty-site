@@ -31,7 +31,7 @@ function encryptBuffer(key, plaintextBuf) {
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const ct = Buffer.concat([cipher.update(plaintextBuf), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return { iv, payload: Buffer.concat([ct, tag]) };
+  return Buffer.concat([iv, ct, tag]);
 }
 
 const key = loadOrCreateKey();
@@ -41,34 +41,49 @@ const html = readFileSync(join(SRC, 'content.html'), 'utf8');
 const css = readFileSync(join(SRC, 'content.css'), 'utf8');
 const meta = JSON.parse(readFileSync(join(SRC, 'meta.json'), 'utf8'));
 
+const contentObj = { html, css, ...meta };
+
+// ---- 2. audio (.mp3/.wav/.ogg/.m4a) → audio.enc.bin ----
 const AUDIO_RX = /\.(mp3|wav|ogg|m4a)$/i;
 const audioFile = readdirSync(SRC).find((f) => AUDIO_RX.test(f));
-
-const payload = { html, css, ...meta };
-if (audioFile) payload.audio = true;
-
-const { iv: contentIv, payload: contentCt } = encryptBuffer(
-  key,
-  Buffer.from(JSON.stringify(payload), 'utf8')
-);
-writeFileSync(
-  join(DOCS, 'content.enc.json'),
-  JSON.stringify({ iv: b64url(contentIv), data: b64url(contentCt) })
-);
-console.log('OK → docs/content.enc.json');
-
-// ---- 2. audio (si présent) → audio.enc.bin (binaire brut : iv|ct|tag) ----
 if (audioFile) {
-  const audioBuf = readFileSync(join(SRC, audioFile));
-  const { iv: aIv, payload: aCt } = encryptBuffer(key, audioBuf);
-  writeFileSync(join(DOCS, 'audio.enc.bin'), Buffer.concat([aIv, aCt]));
-  const mb = (audioBuf.length / 1024 / 1024).toFixed(1);
+  const buf = readFileSync(join(SRC, audioFile));
+  writeFileSync(join(DOCS, 'audio.enc.bin'), encryptBuffer(key, buf));
+  contentObj.audio = true;
+  const mb = (buf.length / 1024 / 1024).toFixed(1);
   console.log(`OK → docs/audio.enc.bin (source: "${audioFile}", ${mb} MB)`);
 }
 
-// ---- 3. rappel URL ----
+// ---- 3. images attendues → <key>.enc.bin ----
+const IMG_RX = /\.(jpg|jpeg|png|webp)$/i;
+const IMG_KEYS = ['intro', 'program'];
+const includedImages = [];
+for (const k of IMG_KEYS) {
+  const file = readdirSync(SRC).find(
+    (f) => f.toLowerCase().startsWith(k) && IMG_RX.test(f)
+  );
+  if (!file) continue;
+  const buf = readFileSync(join(SRC, file));
+  writeFileSync(join(DOCS, `${k}.enc.bin`), encryptBuffer(key, buf));
+  includedImages.push(k);
+  const kb = (buf.length / 1024).toFixed(0);
+  console.log(`OK → docs/${k}.enc.bin (source: "${file}", ${kb} KB)`);
+}
+if (includedImages.length) contentObj.images = includedImages;
+
+// ---- 4. content.enc.json ----
+const contentBuf = Buffer.from(JSON.stringify(contentObj), 'utf8');
+const contentEnc = encryptBuffer(key, contentBuf);
+// On garde le format JSON { iv, data } pour ce fichier (compat existante)
+const iv = contentEnc.slice(0, 12);
+const rest = contentEnc.slice(12);
+writeFileSync(
+  join(DOCS, 'content.enc.json'),
+  JSON.stringify({ iv: b64url(iv), data: b64url(rest) })
+);
+console.log('OK → docs/content.enc.json');
+
+// ---- 5. URL finale ----
 const keyUrl = b64url(key);
-console.log('\nFragment de clé (à coller après #) :');
-console.log('  ' + keyUrl);
 console.log('\nURL complète pour le QR :');
 console.log('  https://leley9.github.io/thecoolparty-site/#' + keyUrl + '\n');

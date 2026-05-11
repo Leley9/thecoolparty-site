@@ -33,7 +33,7 @@
     return;
   }
 
-  const { html, css, reveal, audio: hasAudio } = content;
+  const { html, css, reveal, audio: hasAudio, images = [] } = content;
   const revealAt = new Date(reveal).getTime();
   const root = document.getElementById('root');
 
@@ -42,9 +42,10 @@
   document.head.appendChild(style);
   document.title = ' ';
 
-  const audioPromise = hasAudio ? (async () => {
+  // ---- Décryption d'un binaire (IV|ciphertext|tag) → Blob URL ----
+  async function decryptBin(path, mime) {
     try {
-      const res = await fetch('audio.enc.bin', { cache: 'no-store' });
+      const res = await fetch(path, { cache: 'no-store' });
       if (!res.ok) return null;
       const buf = await res.arrayBuffer();
       const iv = buf.slice(0, 12);
@@ -52,13 +53,19 @@
       const plainBuf = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv }, cryptoKey, data
       );
-      return URL.createObjectURL(new Blob([plainBuf], { type: 'audio/mpeg' }));
+      return URL.createObjectURL(new Blob([plainBuf], { type: mime }));
     } catch {
       return null;
     }
-  })() : Promise.resolve(null);
+  }
+
+  // Tous les assets se chargent en parallèle dès la décryption du content
+  const audioPromise = hasAudio ? decryptBin('audio.enc.bin', 'audio/mpeg') : Promise.resolve(null);
+  const introPromise = images.includes('intro') ? decryptBin('intro.enc.bin', 'image/jpeg') : Promise.resolve(null);
+  const programPromise = images.includes('program') ? decryptBin('program.enc.bin', 'image/jpeg') : Promise.resolve(null);
 
   function playWithFallback(audio) {
+    audio.loop = true;
     audio.volume = 0;
     audio.play().then(() => {
       const fade = setInterval(() => {
@@ -68,7 +75,7 @@
     }).catch(() => {
       const btn = document.createElement('button');
       btn.className = 'play-btn';
-      btn.textContent = '▶ Lancer la musique';
+      btn.textContent = '▶ Play music';
       btn.addEventListener('click', () => {
         audio.volume = 1;
         audio.play();
@@ -78,17 +85,55 @@
     });
   }
 
+  const INTRO_HTML = `
+    <div class="intro">
+      <div class="intro-stage">
+        <div class="intro-row" data-i="0"></div>
+        <div class="intro-row" data-i="1"></div>
+        <div class="intro-row" data-i="2"></div>
+        <div class="intro-row" data-i="3"></div>
+      </div>
+    </div>
+  `;
+
+  // Timing intro :
+  //   - 0-1150ms : 4 rangs apparaissent staggerés (0/150/300/450 + 700ms de fade)
+  //   - 500ms de pause sur l'image complète
+  //   - 1300ms de spread
+  //   → swap accueil à 2950ms
+  const HOLD_MS = 500;
+  const SPREAD_MS = 1300;
+  const APPEAR_END_MS = 450 + 700; // dernier rang appear-end
+
+  async function runIntroThenAccueil() {
+    root.innerHTML = INTRO_HTML;
+    const intro = root.querySelector('.intro');
+
+    // Lance la musique au moment où l'intro démarre
+    const audioUrl = await audioPromise;
+    if (audioUrl) playWithFallback(new Audio(audioUrl));
+
+    await new Promise((r) => setTimeout(r, APPEAR_END_MS + HOLD_MS));
+    intro.classList.add('spread');
+    await new Promise((r) => setTimeout(r, SPREAD_MS));
+
+    root.innerHTML = html;
+  }
+
   async function doReveal(withFade) {
+    // Injecte les blob URLs des images avant le render des éléments qui les utilisent
+    const [introUrl, programUrl] = await Promise.all([introPromise, programPromise]);
+    if (introUrl) document.documentElement.style.setProperty('--intro-img', `url("${introUrl}")`);
+    if (programUrl) document.documentElement.style.setProperty('--program-img', `url("${programUrl}")`);
+
     if (withFade) {
       root.style.transition = 'opacity 500ms ease';
       root.style.opacity = '0';
       await new Promise((r) => setTimeout(r, 500));
     }
-    root.innerHTML = html;
     root.style.opacity = '1';
 
-    const url = await audioPromise;
-    if (url) playWithFallback(new Audio(url));
+    await runIntroThenAccueil();
   }
 
   function pad(n) { return String(n).padStart(2, '0'); }
@@ -116,7 +161,7 @@
     root.innerHTML = `
       <div class="timer">
         <div class="time"><span>--</span><i>:</i><span>--</span><i>:</i><span>--</span><i>:</i><span>--</span></div>
-        <p class="hint">Touchez l'écran pour activer le son</p>
+        <p class="hint">Tap the screen to enable sound</p>
       </div>
     `;
     const hint = root.querySelector('.timer .hint');
