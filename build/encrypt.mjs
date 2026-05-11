@@ -1,48 +1,74 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { randomBytes, createCipheriv } from 'node:crypto';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const KEY_FILE = resolve(ROOT, '.key');
-const SRC_HTML = resolve(ROOT, 'src/content.html');
-const SRC_CSS = resolve(ROOT, 'src/content.css');
-const OUT = resolve(ROOT, 'docs/content.enc.json');
+const SRC = resolve(ROOT, 'src');
+const DOCS = resolve(ROOT, 'docs');
 
 const b64url = (buf) =>
   Buffer.from(buf).toString('base64')
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-let key;
-if (existsSync(KEY_FILE)) {
-  const raw = readFileSync(KEY_FILE, 'utf8').trim();
-  key = Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  if (key.length !== 32) {
-    throw new Error('.key invalide (32 octets attendus en base64url)');
+function loadOrCreateKey() {
+  if (existsSync(KEY_FILE)) {
+    const raw = readFileSync(KEY_FILE, 'utf8').trim();
+    const key = Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    if (key.length !== 32) throw new Error('.key invalide (32 octets attendus en base64url)');
+    return key;
   }
-} else {
-  key = randomBytes(32);
+  const key = randomBytes(32);
   writeFileSync(KEY_FILE, b64url(key) + '\n', { mode: 0o600 });
-  console.log('Nouvelle clé générée → .key (gitignored, garde-la précieusement)');
+  console.log('Nouvelle clé générée → .key');
+  return key;
 }
 
-const html = readFileSync(SRC_HTML, 'utf8');
-const css = readFileSync(SRC_CSS, 'utf8');
-const plaintext = Buffer.from(JSON.stringify({ html, css }), 'utf8');
+function encryptBuffer(key, plaintextBuf) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(plaintextBuf), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { iv, payload: Buffer.concat([ct, tag]) };
+}
 
-const iv = randomBytes(12);
-const cipher = createCipheriv('aes-256-gcm', key, iv);
-const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-const tag = cipher.getAuthTag();
-const payload = Buffer.concat([ct, tag]);
+const key = loadOrCreateKey();
 
-writeFileSync(OUT, JSON.stringify({ iv: b64url(iv), data: b64url(payload) }));
+// ---- 1. contenu texte (html + css + meta) → content.enc.json ----
+const html = readFileSync(join(SRC, 'content.html'), 'utf8');
+const css = readFileSync(join(SRC, 'content.css'), 'utf8');
+const meta = JSON.parse(readFileSync(join(SRC, 'meta.json'), 'utf8'));
 
+const AUDIO_RX = /\.(mp3|wav|ogg|m4a)$/i;
+const audioFile = readdirSync(SRC).find((f) => AUDIO_RX.test(f));
+
+const payload = { html, css, ...meta };
+if (audioFile) payload.audio = true;
+
+const { iv: contentIv, payload: contentCt } = encryptBuffer(
+  key,
+  Buffer.from(JSON.stringify(payload), 'utf8')
+);
+writeFileSync(
+  join(DOCS, 'content.enc.json'),
+  JSON.stringify({ iv: b64url(contentIv), data: b64url(contentCt) })
+);
+console.log('OK → docs/content.enc.json');
+
+// ---- 2. audio (si présent) → audio.enc.bin (binaire brut : iv|ct|tag) ----
+if (audioFile) {
+  const audioBuf = readFileSync(join(SRC, audioFile));
+  const { iv: aIv, payload: aCt } = encryptBuffer(key, audioBuf);
+  writeFileSync(join(DOCS, 'audio.enc.bin'), Buffer.concat([aIv, aCt]));
+  const mb = (audioBuf.length / 1024 / 1024).toFixed(1);
+  console.log(`OK → docs/audio.enc.bin (source: "${audioFile}", ${mb} MB)`);
+}
+
+// ---- 3. rappel URL ----
 const keyUrl = b64url(key);
-console.log('\nOK → docs/content.enc.json');
-console.log('\nFragment à coller après le # de l\'URL :');
+console.log('\nFragment de clé (à coller après #) :');
 console.log('  ' + keyUrl);
-console.log('\nExemple :');
-console.log('  https://<user>.github.io/<repo>/#' + keyUrl);
-console.log('\nC\'est cette URL complète qu\'il faut encoder dans le QR code.\n');
+console.log('\nURL complète pour le QR :');
+console.log('  https://leley9.github.io/thecoolparty-site/#' + keyUrl + '\n');
