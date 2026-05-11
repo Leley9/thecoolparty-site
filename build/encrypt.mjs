@@ -83,7 +83,16 @@ writeFileSync(
 );
 console.log('OK → docs/content.enc.json');
 
-// ---- 5. URL finale ----
+// ---- 5. cache-bust : injecte le timestamp dans docs/index.html ----
+const INDEX = join(DOCS, 'index.html');
+const idx = readFileSync(INDEX, 'utf8');
+const stamped = idx.replace(/app\.js\?v=\d+/, `app.js?v=${Date.now()}`);
+if (stamped !== idx) {
+  writeFileSync(INDEX, stamped);
+  console.log('OK → docs/index.html (cache-bust mis à jour)');
+}
+
+// ---- 6. URL finale ----
 const keyUrl = b64url(key);
 console.log('\nURL complète pour le QR :');
 console.log('  https://leley9.github.io/thecoolparty-site/#' + keyUrl + '\n');
