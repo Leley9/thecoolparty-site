@@ -1,0 +1,7 @@
+.key
+.DS_Store
+node_modules/
+
+# Contenu source en clair — JAMAIS commit, le repo est public.
+# On garde src/ uniquement en local + dans une sauvegarde perso.
+/src/
