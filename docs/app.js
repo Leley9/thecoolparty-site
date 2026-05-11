@@ -45,7 +45,6 @@
   document.head.appendChild(style);
   document.title = ' ';
 
-  // ---- Décryption d'un binaire (IV|ciphertext|tag) → Blob URL ----
   async function decryptBin(path, mime) {
     try {
       const res = await fetch(path, { cache: 'no-store' });
@@ -62,26 +61,60 @@
     }
   }
 
-  // Tous les assets se chargent en parallèle dès la décryption du content
   const audioPromise = hasAudio ? decryptBin('audio.enc.bin', 'audio/mpeg') : Promise.resolve(null);
   const introPromise = images.includes('intro') ? decryptBin('intro.enc.bin', 'image/jpeg') : Promise.resolve(null);
   const programPromise = images.includes('program') ? decryptBin('program.enc.bin', 'image/jpeg') : Promise.resolve(null);
 
-  function playWithFallback(audio) {
-    audio.loop = true;
-    audio.volume = 0;
-    audio.play().then(() => {
+  // ---- Audio : un seul élément, primé lors du tap pendant le countdown ----
+  // Sans ce priming, iOS ne propage pas le user-gesture jusqu'à un Audio créé
+  // plus tard de manière asynchrone → autoplay refusé même après tap.
+  const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+  const audioEl = new Audio();
+  audioEl.loop = true;
+  audioEl.preload = 'auto';
+  let audioPrimed = false;
+
+  function primeAudio() {
+    if (audioPrimed) return;
+    audioPrimed = true;
+    // Play silencieux dans le gesture handler → débloque l'élément sur iOS.
+    // Une fois débloqué, changer src vers la musique réelle plus tard préserve
+    // l'autorisation de lecture.
+    audioEl.src = SILENT_WAV;
+    audioEl.muted = true;
+    audioEl.play().then(() => {
+      audioEl.pause();
+      audioEl.currentTime = 0;
+      audioEl.muted = false;
+    }).catch(() => {
+      audioEl.muted = false;
+    });
+  }
+
+  audioPromise.then((url) => {
+    if (!url) return;
+    // Remplace la source ; si on a primé, l'élément reste débloqué.
+    const wasPlaying = !audioEl.paused;
+    audioEl.pause();
+    audioEl.src = url;
+    if (wasPlaying) audioEl.play().catch(() => {});
+  });
+
+  function startMusic() {
+    audioEl.volume = 0;
+    audioEl.play().then(() => {
       const fade = setInterval(() => {
-        if (audio.volume < 1) audio.volume = Math.min(1, audio.volume + 0.04);
+        if (audioEl.volume < 1) audioEl.volume = Math.min(1, audioEl.volume + 0.04);
         else clearInterval(fade);
       }, 50);
     }).catch(() => {
+      // Autoplay refusé malgré tout → bouton de secours
       const btn = document.createElement('button');
       btn.className = 'play-btn';
       btn.textContent = '▶ Play music';
       btn.addEventListener('click', () => {
-        audio.volume = 1;
-        audio.play();
+        audioEl.volume = 1;
+        audioEl.play();
         btn.remove();
       }, { once: true });
       document.body.appendChild(btn);
@@ -99,22 +132,17 @@
     </div>
   `;
 
-  // Timing intro :
-  //   - 0-1150ms : 4 rangs apparaissent staggerés (0/150/300/450 + 700ms de fade)
-  //   - 500ms de pause sur l'image complète
-  //   - 1300ms de spread
-  //   → swap accueil à 2950ms
   const HOLD_MS = 500;
   const SPREAD_MS = 1300;
-  const APPEAR_END_MS = 450 + 700; // dernier rang appear-end
+  const APPEAR_END_MS = 450 + 700;
 
   async function runIntroThenAccueil() {
     root.innerHTML = INTRO_HTML;
     const intro = root.querySelector('.intro');
 
-    // Lance la musique au moment où l'intro démarre
-    const audioUrl = await audioPromise;
-    if (audioUrl) playWithFallback(new Audio(audioUrl));
+    // S'assure que la source audio est en place puis lance
+    await audioPromise;
+    if (hasAudio) startMusic();
 
     await new Promise((r) => setTimeout(r, APPEAR_END_MS + HOLD_MS));
     intro.classList.add('spread');
@@ -124,7 +152,6 @@
   }
 
   async function doReveal(withFade) {
-    // Injecte les blob URLs des images avant le render des éléments qui les utilisent
     const [introUrl, programUrl] = await Promise.all([introPromise, programPromise]);
     if (introUrl) document.documentElement.style.setProperty('--intro-img', `url("${introUrl}")`);
     if (programUrl) document.documentElement.style.setProperty('--program-img', `url("${programUrl}")`);
@@ -169,6 +196,7 @@
     `;
     const hint = root.querySelector('.timer .hint');
     root.querySelector('.timer').addEventListener('pointerdown', () => {
+      primeAudio();
       hint.style.opacity = '0';
       setTimeout(() => {
         hint.textContent = "you're on";
