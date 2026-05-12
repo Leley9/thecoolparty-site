@@ -85,31 +85,42 @@
   );
 
   // ---- Audio : un seul élément, primé lors du tap pour autoplay iOS ----
+  // Si l'audio réel est déjà chargé au moment du tap → on prime directement
+  // avec la vraie source (le plus fiable). Sinon → silence le temps que
+  // l'audio finisse de se déchiffrer, puis on swap la src.
   const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
   const audioEl = new Audio();
   audioEl.loop = true;
   audioEl.preload = 'auto';
   let audioPrimed = false;
+  let realSrcReady = false;
+
+  audioPromise.then((url) => {
+    if (!url) return;
+    audioEl.src = url;
+    realSrcReady = true;
+    audioEl.load();
+  });
 
   function primeAudio() {
     if (audioPrimed) return;
     audioPrimed = true;
-    audioEl.src = SILENT_WAV;
+    // Bug avant : on écrasait toujours src par SILENT_WAV, ce qui pétait
+    // la vraie source si elle était déjà là. On garde la vraie src si dispo.
+    if (!realSrcReady) {
+      audioEl.src = SILENT_WAV;
+    }
     audioEl.muted = true;
-    audioEl.play().then(() => {
-      audioEl.pause();
-      audioEl.currentTime = 0;
-      audioEl.muted = false;
-    }).catch(() => {
-      audioEl.muted = false;
-    });
+    const p = audioEl.play();
+    if (p) {
+      p.then(() => {
+        audioEl.pause();
+        audioEl.muted = false;
+      }).catch(() => {
+        audioEl.muted = false;
+      });
+    }
   }
-
-  audioPromise.then((url) => {
-    if (!url) return;
-    audioEl.pause();
-    audioEl.src = url;
-  });
 
   function startMusic() {
     audioEl.currentTime = 0;
