@@ -3,5 +3,7 @@
 node_modules/
 
 # Contenu source en clair — JAMAIS commit, le repo est public.
-# On garde src/ uniquement en local + dans une sauvegarde perso.
+# On garde tout ça en local + dans une sauvegarde perso.
 /src/
+/assets/
+/fonts/
