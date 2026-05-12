@@ -157,7 +157,10 @@
     root.innerHTML = `
       <div class="timer">
         <div class="time"><span>--</span><i>:</i><span>--</span><i>:</i><span>--</span><i>:</i><span>--</span></div>
+        <div class="rabbit rabbit-looking"></div>
         <p class="hint">Tap the screen to enable sound</p>
+        <div class="rabbit rabbit-seating"></div>
+        <div class="rabbit rabbit-running"></div>
       </div>
     `;
     const hint = root.querySelector('.timer .hint');
