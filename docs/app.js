@@ -37,7 +37,7 @@
     return;
   }
 
-  const { html, css, reveal, audio: hasAudio } = content;
+  const { html, css, reveal, audio: hasAudio, images = [] } = content;
   const revealAt = new Date(reveal).getTime();
 
   const style = document.createElement('style');
@@ -45,10 +45,10 @@
   document.head.appendChild(style);
   document.title = ' ';
 
-  // ---- Audio chiffré → Blob URL ----
-  async function decryptAudio() {
+  // ---- Décryption d'un binaire (IV|ciphertext|tag) → Blob URL ----
+  async function decryptBin(path, mime) {
     try {
-      const res = await fetch('audio.enc.bin', { cache: 'no-store' });
+      const res = await fetch(path, { cache: 'no-store' });
       if (!res.ok) return null;
       const buf = await res.arrayBuffer();
       const iv = buf.slice(0, 12);
@@ -56,13 +56,21 @@
       const plainBuf = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv }, cryptoKey, data
       );
-      return URL.createObjectURL(new Blob([plainBuf], { type: 'audio/mpeg' }));
+      return URL.createObjectURL(new Blob([plainBuf], { type: mime }));
     } catch {
       return null;
     }
   }
 
-  const audioPromise = hasAudio ? decryptAudio() : Promise.resolve(null);
+  const audioPromise = hasAudio ? decryptBin('audio.enc.bin', 'audio/mpeg') : Promise.resolve(null);
+
+  // Toutes les images sont déchiffrées en parallèle et exposées comme variables
+  // CSS --<name>-img. Disponibles dès que prêtes, le CSS s'auto-remplit.
+  for (const { name, mime } of images) {
+    decryptBin(`${name}.enc.bin`, mime).then((url) => {
+      if (url) document.documentElement.style.setProperty(`--${name}-img`, `url("${url}")`);
+    });
+  }
 
   // ---- Audio : un seul élément, primé lors du tap pour autoplay iOS ----
   const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';

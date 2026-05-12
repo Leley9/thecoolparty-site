@@ -40,7 +40,6 @@ const key = loadOrCreateKey();
 const html = readFileSync(join(SRC, 'content.html'), 'utf8');
 const css = readFileSync(join(SRC, 'content.css'), 'utf8');
 const meta = JSON.parse(readFileSync(join(SRC, 'meta.json'), 'utf8'));
-
 const contentObj = { html, css, ...meta };
 
 // ---- 2. audio (.mp3/.wav/.ogg/.m4a) → audio.enc.bin ----
@@ -53,7 +52,23 @@ if (audioFile) {
   console.log(`OK → docs/audio.enc.bin (source: "${audioFile}", ${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
 }
 
-// ---- 3. content.enc.json (format { iv, data } base64url) ----
+// ---- 3. images (png/jpg/webp) → <name>.enc.bin + liste dans content ----
+const IMG_RX = /\.(png|jpg|jpeg|webp)$/i;
+const imageEntries = [];
+for (const f of readdirSync(SRC)) {
+  const m = f.match(IMG_RX);
+  if (!m) continue;
+  const name = f.slice(0, -m[0].length).toLowerCase();
+  const ext = m[1].toLowerCase();
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  const buf = readFileSync(join(SRC, f));
+  writeFileSync(join(DOCS, `${name}.enc.bin`), encryptBuffer(key, buf));
+  imageEntries.push({ name, mime });
+  console.log(`OK → docs/${name}.enc.bin (source: "${f}", ${(buf.length / 1024).toFixed(0)} KB)`);
+}
+if (imageEntries.length) contentObj.images = imageEntries;
+
+// ---- 4. content.enc.json ----
 const contentEnc = encryptBuffer(key, Buffer.from(JSON.stringify(contentObj), 'utf8'));
 const iv = contentEnc.slice(0, 12);
 const rest = contentEnc.slice(12);
@@ -63,7 +78,7 @@ writeFileSync(
 );
 console.log('OK → docs/content.enc.json');
 
-// ---- 4. cache-bust : timestamp injecté dans docs/index.html ----
+// ---- 5. cache-bust : timestamp injecté dans docs/index.html ----
 const INDEX = join(DOCS, 'index.html');
 const idx = readFileSync(INDEX, 'utf8');
 const stamped = idx.replace(/app\.js\?v=\d+/, `app.js?v=${Date.now()}`);
@@ -72,6 +87,5 @@ if (stamped !== idx) {
   console.log('OK → docs/index.html (cache-bust mis à jour)');
 }
 
-// ---- 5. URL finale ----
 console.log('\nURL complète pour le QR :');
 console.log('  https://leley9.github.io/thecoolparty-site/#' + b64url(key) + '\n');
