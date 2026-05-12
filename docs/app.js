@@ -120,15 +120,7 @@
         else clearInterval(fade);
       }, 50);
     }).catch(() => {
-      const btn = document.createElement('button');
-      btn.className = 'play-btn';
-      btn.textContent = '▶ Play music';
-      btn.addEventListener('click', () => {
-        audioEl.volume = 1;
-        audioEl.play();
-        btn.remove();
-      }, { once: true });
-      document.body.appendChild(btn);
+      // Pas de tap pendant le countdown → autoplay refusé. Silencieux.
     });
   }
 
