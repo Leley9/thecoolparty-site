@@ -36,7 +36,7 @@ function encryptBuffer(key, plaintextBuf) {
 
 const key = loadOrCreateKey();
 
-// ---- 1. contenu texte (html + css + meta) → content.enc.json ----
+// ---- 1. content (html + css + meta) → content.enc.json ----
 const html = readFileSync(join(SRC, 'content.html'), 'utf8');
 const css = readFileSync(join(SRC, 'content.css'), 'utf8');
 const meta = JSON.parse(readFileSync(join(SRC, 'meta.json'), 'utf8'));
@@ -50,31 +50,11 @@ if (audioFile) {
   const buf = readFileSync(join(SRC, audioFile));
   writeFileSync(join(DOCS, 'audio.enc.bin'), encryptBuffer(key, buf));
   contentObj.audio = true;
-  const mb = (buf.length / 1024 / 1024).toFixed(1);
-  console.log(`OK → docs/audio.enc.bin (source: "${audioFile}", ${mb} MB)`);
+  console.log(`OK → docs/audio.enc.bin (source: "${audioFile}", ${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
 }
 
-// ---- 3. images attendues → <key>.enc.bin ----
-const IMG_RX = /\.(jpg|jpeg|png|webp)$/i;
-const IMG_KEYS = ['intro', 'program'];
-const includedImages = [];
-for (const k of IMG_KEYS) {
-  const file = readdirSync(SRC).find(
-    (f) => f.toLowerCase().startsWith(k) && IMG_RX.test(f)
-  );
-  if (!file) continue;
-  const buf = readFileSync(join(SRC, file));
-  writeFileSync(join(DOCS, `${k}.enc.bin`), encryptBuffer(key, buf));
-  includedImages.push(k);
-  const kb = (buf.length / 1024).toFixed(0);
-  console.log(`OK → docs/${k}.enc.bin (source: "${file}", ${kb} KB)`);
-}
-if (includedImages.length) contentObj.images = includedImages;
-
-// ---- 4. content.enc.json ----
-const contentBuf = Buffer.from(JSON.stringify(contentObj), 'utf8');
-const contentEnc = encryptBuffer(key, contentBuf);
-// On garde le format JSON { iv, data } pour ce fichier (compat existante)
+// ---- 3. content.enc.json (format { iv, data } base64url) ----
+const contentEnc = encryptBuffer(key, Buffer.from(JSON.stringify(contentObj), 'utf8'));
 const iv = contentEnc.slice(0, 12);
 const rest = contentEnc.slice(12);
 writeFileSync(
@@ -83,7 +63,7 @@ writeFileSync(
 );
 console.log('OK → docs/content.enc.json');
 
-// ---- 5. cache-bust : injecte le timestamp dans docs/index.html ----
+// ---- 4. cache-bust : timestamp injecté dans docs/index.html ----
 const INDEX = join(DOCS, 'index.html');
 const idx = readFileSync(INDEX, 'utf8');
 const stamped = idx.replace(/app\.js\?v=\d+/, `app.js?v=${Date.now()}`);
@@ -92,7 +72,6 @@ if (stamped !== idx) {
   console.log('OK → docs/index.html (cache-bust mis à jour)');
 }
 
-// ---- 6. URL finale ----
-const keyUrl = b64url(key);
+// ---- 5. URL finale ----
 console.log('\nURL complète pour le QR :');
-console.log('  https://leley9.github.io/thecoolparty-site/#' + keyUrl + '\n');
+console.log('  https://leley9.github.io/thecoolparty-site/#' + b64url(key) + '\n');

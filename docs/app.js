@@ -37,7 +37,7 @@
     return;
   }
 
-  const { html, css, reveal, audio: hasAudio, images = [] } = content;
+  const { html, css, reveal, audio: hasAudio } = content;
   const revealAt = new Date(reveal).getTime();
 
   const style = document.createElement('style');
@@ -45,9 +45,10 @@
   document.head.appendChild(style);
   document.title = ' ';
 
-  async function decryptBin(path, mime) {
+  // ---- Audio chiffré → Blob URL ----
+  async function decryptAudio() {
     try {
-      const res = await fetch(path, { cache: 'no-store' });
+      const res = await fetch('audio.enc.bin', { cache: 'no-store' });
       if (!res.ok) return null;
       const buf = await res.arrayBuffer();
       const iv = buf.slice(0, 12);
@@ -55,19 +56,15 @@
       const plainBuf = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv }, cryptoKey, data
       );
-      return URL.createObjectURL(new Blob([plainBuf], { type: mime }));
+      return URL.createObjectURL(new Blob([plainBuf], { type: 'audio/mpeg' }));
     } catch {
       return null;
     }
   }
 
-  const audioPromise = hasAudio ? decryptBin('audio.enc.bin', 'audio/mpeg') : Promise.resolve(null);
-  const introPromise = images.includes('intro') ? decryptBin('intro.enc.bin', 'image/jpeg') : Promise.resolve(null);
-  const programPromise = images.includes('program') ? decryptBin('program.enc.bin', 'image/jpeg') : Promise.resolve(null);
+  const audioPromise = hasAudio ? decryptAudio() : Promise.resolve(null);
 
-  // ---- Audio : un seul élément, primé lors du tap pendant le countdown ----
-  // Sans ce priming, iOS ne propage pas le user-gesture jusqu'à un Audio créé
-  // plus tard de manière asynchrone → autoplay refusé même après tap.
+  // ---- Audio : un seul élément, primé lors du tap pour autoplay iOS ----
   const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
   const audioEl = new Audio();
   audioEl.loop = true;
@@ -77,9 +74,6 @@
   function primeAudio() {
     if (audioPrimed) return;
     audioPrimed = true;
-    // Play silencieux dans le gesture handler → débloque l'élément sur iOS.
-    // Une fois débloqué, changer src vers la musique réelle plus tard préserve
-    // l'autorisation de lecture.
     audioEl.src = SILENT_WAV;
     audioEl.muted = true;
     audioEl.play().then(() => {
@@ -93,11 +87,8 @@
 
   audioPromise.then((url) => {
     if (!url) return;
-    // Remplace la source ; si on a primé, l'élément reste débloqué.
-    const wasPlaying = !audioEl.paused;
     audioEl.pause();
     audioEl.src = url;
-    if (wasPlaying) audioEl.play().catch(() => {});
   });
 
   function startMusic() {
@@ -108,7 +99,6 @@
         else clearInterval(fade);
       }, 50);
     }).catch(() => {
-      // Autoplay refusé malgré tout → bouton de secours
       const btn = document.createElement('button');
       btn.className = 'play-btn';
       btn.textContent = '▶ Play music';
@@ -121,49 +111,17 @@
     });
   }
 
-  const INTRO_HTML = `
-    <div class="intro">
-      <div class="intro-stage">
-        <div class="intro-row" data-i="0"></div>
-        <div class="intro-row" data-i="1"></div>
-        <div class="intro-row" data-i="2"></div>
-        <div class="intro-row" data-i="3"></div>
-      </div>
-    </div>
-  `;
-
-  const HOLD_MS = 500;
-  const SPREAD_MS = 1300;
-  const APPEAR_END_MS = 450 + 700;
-
-  async function runIntroThenAccueil() {
-    root.innerHTML = INTRO_HTML;
-    const intro = root.querySelector('.intro');
-
-    // S'assure que la source audio est en place puis lance
-    await audioPromise;
-    if (hasAudio) startMusic();
-
-    await new Promise((r) => setTimeout(r, APPEAR_END_MS + HOLD_MS));
-    intro.classList.add('spread');
-    await new Promise((r) => setTimeout(r, SPREAD_MS));
-
-    root.innerHTML = html;
-  }
-
   async function doReveal(withFade) {
-    const [introUrl, programUrl] = await Promise.all([introPromise, programPromise]);
-    if (introUrl) document.documentElement.style.setProperty('--intro-img', `url("${introUrl}")`);
-    if (programUrl) document.documentElement.style.setProperty('--program-img', `url("${programUrl}")`);
-
     if (withFade) {
       root.style.transition = 'opacity 500ms ease';
       root.style.opacity = '0';
       await new Promise((r) => setTimeout(r, 500));
     }
+    root.innerHTML = html;
     root.style.opacity = '1';
 
-    await runIntroThenAccueil();
+    await audioPromise;
+    if (hasAudio) startMusic();
   }
 
   function pad(n) { return String(n).padStart(2, '0'); }
