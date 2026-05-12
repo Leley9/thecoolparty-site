@@ -68,10 +68,30 @@ for (const f of readdirSync(SRC)) {
 }
 if (imageEntries.length) contentObj.images = imageEntries;
 
+// ---- 4. fonts (otf/ttf/woff/woff2) → <name>.enc.bin + liste dans content ----
+const FONT_RX = /\.(otf|ttf|woff2|woff)$/i;
+const fontEntries = [];
+for (const f of readdirSync(SRC)) {
+  const m = f.match(FONT_RX);
+  if (!m) continue;
+  const name = f.slice(0, -m[0].length).toLowerCase();
+  const ext = m[1].toLowerCase();
+  const mime = ext === 'otf' ? 'font/otf'
+            : ext === 'ttf' ? 'font/ttf'
+            : ext === 'woff2' ? 'font/woff2'
+            : 'font/woff';
+  const family = name.charAt(0).toUpperCase() + name.slice(1);
+  const buf = readFileSync(join(SRC, f));
+  writeFileSync(join(DOCS, `${name}.enc.bin`), encryptBuffer(key, buf));
+  fontEntries.push({ name, family, mime });
+  console.log(`OK → docs/${name}.enc.bin (font: "${f}" → family "${family}", ${(buf.length / 1024).toFixed(0)} KB)`);
+}
+if (fontEntries.length) contentObj.fonts = fontEntries;
+
 // ---- 4. content.enc.json ----
 const contentEnc = encryptBuffer(key, Buffer.from(JSON.stringify(contentObj), 'utf8'));
-const iv = contentEnc.slice(0, 12);
-const rest = contentEnc.slice(12);
+const iv = contentEnc.subarray(0, 12);
+const rest = contentEnc.subarray(12);
 writeFileSync(
   join(DOCS, 'content.enc.json'),
   JSON.stringify({ iv: b64url(iv), data: b64url(rest) })

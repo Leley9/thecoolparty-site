@@ -37,7 +37,7 @@
     return;
   }
 
-  const { html, css, reveal, audio: hasAudio, images = [] } = content;
+  const { html, css, reveal, audio: hasAudio, images = [], fonts = [] } = content;
   const revealAt = new Date(reveal).getTime();
 
   const style = document.createElement('style');
@@ -72,6 +72,18 @@
     });
   }
 
+  // Fonts : déchiffrement + enregistrement via FontFace API, en parallèle.
+  // On collecte les promesses pour attendre le chargement avant le reveal,
+  // sinon FOUT visible quand on swap vers .page (qui utilise la font).
+  const fontPromises = fonts.map(({ name, family, mime }) =>
+    decryptBin(`${name}.enc.bin`, mime).then(async (url) => {
+      if (!url) return;
+      const face = new FontFace(family, `url(${url})`);
+      await face.load();
+      document.fonts.add(face);
+    })
+  );
+
   // ---- Audio : un seul élément, primé lors du tap pour autoplay iOS ----
   const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
   const audioEl = new Audio();
@@ -100,6 +112,7 @@
   });
 
   function startMusic() {
+    audioEl.currentTime = 0;
     audioEl.volume = 0;
     audioEl.play().then(() => {
       const fade = setInterval(() => {
@@ -120,6 +133,9 @@
   }
 
   async function doReveal(withFade) {
+    // Attend les fonts pour éviter un FOUT (la page utilise Danken)
+    await Promise.all(fontPromises);
+
     if (withFade) {
       root.style.transition = 'opacity 500ms ease';
       root.style.opacity = '0';
